@@ -22,7 +22,7 @@ rates it high risk.
 
 ```bash
 pi install git:github.com/puetsua/pi-cruise-control
-pi install git:github.com/puetsua/pi-cruise-control@0.1.0   # pinned to a tag
+pi install git:github.com/puetsua/pi-cruise-control@0.2.0   # pinned to a tag
 ```
 
 ## Configure
