@@ -3,6 +3,7 @@ import { resolveModel } from "./classifier";
 import { registerCommands } from "./commands";
 import { saveGlobalField } from "./config";
 import { blockReason, Gate } from "./gate";
+import { notifyIfInstructionsWritten } from "./instructions-notice";
 import { canPrompt, readAvailable, selectModel } from "./selectors";
 
 /**
@@ -46,6 +47,8 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
+    notifyIfInstructionsWritten(gate, ctx);
+
     if (!resolveModel(config, ctx)) {
       const detail = config.model ? `"${config.model}" is unavailable` : "no model is selected";
       ctx.ui.notify(
@@ -75,6 +78,9 @@ export default function (pi: ExtensionAPI) {
     saveGlobalField("model", picked);
     gate.reloadConfig(ctx.cwd);
     ctx.ui.notify(`cruise-control model set to ${picked}`, "info");
+
+    // A model now exists, so the rules are worth writing down.
+    notifyIfInstructionsWritten(gate, ctx);
   }
 
   pi.on("tool_call", async (event, ctx) => {

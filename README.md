@@ -29,6 +29,8 @@ pi install git:github.com/puetsua/pi-cruise-control@0.1.0   # pinned to a tag
 
 Inactive until a `cruise_control` key exists in `~/.pi/agent/settings.json` (global) or
 `<project>/.pi/settings.json` (project), so installing it never silently changes how your tools run.
+`/cruise-control on` writes one for you; once a model is set, the default rules are written into the
+settings file too, ready to edit.
 
 ```json
 {

@@ -21,17 +21,7 @@
     "url": "https://github.com/puetsua/pi-cruise-control/issues"
   },
   "files": [
-    "index.ts",
-    "audit.ts",
-    "cache.ts",
-    "classifier.ts",
-    "commands.ts",
-    "config.ts",
-    "gate.ts",
-    "selectors.ts",
-    "limiter.ts",
-    "stats.ts",
-    "types.ts",
+    "*.ts",
     "docs",
     "README.md",
     "LICENSE"

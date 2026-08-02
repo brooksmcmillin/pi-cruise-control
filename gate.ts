@@ -2,7 +2,7 @@ import type { ExtensionContext, ToolCallEvent } from "@earendil-works/pi-coding-
 import { AuditLog } from "./audit";
 import { cacheKey, ClassificationCache } from "./cache";
 import { classify, ClassifierError, resolveModel } from "./classifier";
-import { configFingerprint, type CruiseControlConfig, loadConfig } from "./config";
+import { configFingerprint, type CruiseControlConfig, loadConfig, saveGlobalInstructions } from "./config";
 import { ConcurrencyLimiter } from "./limiter";
 import { StatsTracker } from "./stats";
 import type { Classification, ClassificationRequest, Decision } from "./types";
@@ -58,6 +58,28 @@ export class Gate {
     this.audit.setConfig(this.config.log);
     this.limiter.setLimit(this.config.maxConcurrent);
     return this.config;
+  }
+
+  /**
+   * Once classification is genuinely set up — enabled, with a chosen model — write the
+   * built-in rules into the global settings file and return true.
+   *
+   * Until then they are invisible defaults, and the rules are the part of this
+   * extension a user most needs to see and adjust. Guarded on `instructionsConfigured`,
+   * so hand-written rules are never overwritten, and silent on write failure since the
+   * same defaults are already in force in memory.
+   */
+  materializeInstructions(cwd: string): boolean {
+    if (!this.config.enabled || !this.config.model || this.config.instructionsConfigured) return false;
+
+    try {
+      saveGlobalInstructions();
+    } catch {
+      return false;
+    }
+
+    this.reloadConfig(cwd);
+    return true;
   }
 
   async pruneLogs(): Promise<number> {

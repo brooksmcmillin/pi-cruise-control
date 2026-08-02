@@ -64,6 +64,11 @@ export interface CruiseControlConfig {
   instructions: Instructions;
   /** True when a `cruise_control` key was found in at least one settings file. */
   configured: boolean;
+  /**
+   * True when a settings file supplied at least one instruction list. False means
+   * `instructions` holds the built-in defaults, which nothing has written down yet.
+   */
+  instructionsConfigured: boolean;
 }
 
 export const SETTINGS_KEY = "cruise_control";
@@ -76,7 +81,9 @@ export const REASONING_LEVELS: readonly ThinkingLevel[] = [
   "max",
 ];
 
-const DEFAULT_INSTRUCTIONS: Instructions = {
+export const INSTRUCTION_LISTS = ["background", "allow", "conditional", "deny"] as const;
+
+export const DEFAULT_INSTRUCTIONS: Instructions = {
   background: [
     "The user is doing software engineering work in a local project workspace.",
     "Read, search, and list operations inside the project workspace are normal exploratory work.",
@@ -116,8 +123,11 @@ function defaults(): CruiseControlConfig {
     maxConcurrent: 0,
     cache: { enabled: true, ttlMs: 30 * 60_000, maxEntries: 500 },
     log: { enabled: true, dir: join(getAgentDir(), "cruise-control"), retentionDays: 30 },
-    instructions: DEFAULT_INSTRUCTIONS,
+    // Copied, not shared: applySection() replaces lists in place, and a mutated
+    // module-level default would leak across every later load.
+    instructions: structuredClone(DEFAULT_INSTRUCTIONS),
     configured: false,
+    instructionsConfigured: false,
   };
 }
 
@@ -157,13 +167,32 @@ export function loadConfig(cwd: string): CruiseControlConfig {
  * the other.
  */
 export function saveGlobalField(field: "model" | "reasoning" | "enabled", value: string | boolean): void {
+  writeGlobalSection((section) => {
+    section[field] = value;
+  });
+}
+
+/**
+ * Write the built-in rules into the global settings file so they stop being invisible
+ * defaults and become text the user can read and edit.
+ *
+ * Only ever called when no settings file supplied instructions, so this cannot
+ * overwrite hand-written rules.
+ */
+export function saveGlobalInstructions(instructions: Instructions = DEFAULT_INSTRUCTIONS): void {
+  writeGlobalSection((section) => {
+    section.instructions = structuredClone(instructions);
+  });
+}
+
+function writeGlobalSection(mutate: (section: RawRecord) => void): void {
   const path = globalSettingsPath();
   const settings = readJson(path) ?? {};
   const existing = settings[SETTINGS_KEY];
   const section: RawRecord =
     existing && typeof existing === "object" && !Array.isArray(existing) ? { ...(existing as RawRecord) } : {};
 
-  section[field] = value;
+  mutate(section);
   settings[SETTINGS_KEY] = section;
   writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
 }
@@ -222,9 +251,11 @@ function applySection(config: CruiseControlConfig, raw: RawRecord): void {
   if (instructions) {
     // Each list is replaced wholesale rather than concatenated: a project that
     // overrides `deny` means "these are the deny rules", not "also these".
-    for (const key of ["background", "allow", "conditional", "deny"] as const) {
+    for (const key of INSTRUCTION_LISTS) {
       const list = instructions[key];
-      if (Array.isArray(list)) config.instructions[key] = stringArray(list);
+      if (!Array.isArray(list)) continue;
+      config.instructions[key] = stringArray(list);
+      config.instructionsConfigured = true;
     }
   }
 }

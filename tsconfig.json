@@ -19,6 +19,7 @@
     "config.ts",
     "gate.ts",
     "selectors.ts",
+    "instructions-notice.ts",
     "limiter.ts",
     "stats.ts",
     "types.ts"

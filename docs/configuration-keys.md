@@ -59,6 +59,22 @@ conflicts.
 }
 ```
 
+## Defaults are written down once setup is complete
+
+The instruction lists start as built-in defaults that exist only in memory, which makes the most
+important part of the extension — the rules — invisible and hard to tune. So the first time
+classification is genuinely set up (`enabled` is true **and** a `model` is configured), the built-in
+lists are written into the global settings file verbatim, and a notice points at the path.
+
+After that they are ordinary configuration: edit them, delete entries, add your own. The write is
+guarded on whether *any* settings file supplied at least one list, so hand-written rules are never
+overwritten — including a project file that sets only `allow`. If the settings file cannot be
+written, the same defaults stay in force in memory and nothing fails.
+
+This happens at session start, and also right after `/cruise-control on` or `/cruise-control model`
+completes the setup, so the rules appear at the moment classification becomes usable rather than on
+the next session.
+
 ## Merge semantics
 
 Scalar keys are overridden individually, so a project file that sets only `reasoning` inherits the

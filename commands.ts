@@ -3,6 +3,7 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@e
 import { resolveModel } from "./classifier";
 import { isReasoning, REASONING_LEVELS, saveGlobalField } from "./config";
 import type { Gate } from "./gate";
+import { notifyIfInstructionsWritten } from "./instructions-notice";
 import { canPrompt, readAvailable, selectModel, selectReasoning } from "./selectors";
 import type { SessionStats } from "./stats";
 import { LEVELS, type Level } from "./types";
@@ -12,7 +13,7 @@ const SUBCOMMANDS = [
   { value: "off", label: "off - let every tool call through unclassified" },
   { value: "stats", label: "stats - session classification counters" },
   { value: "model", label: "model [provider/id] - pick or set the classifier model" },
-  { value: "reasoning", label: "reasoning <level> - set the classifier reasoning level" },
+  { value: "reasoning", label: "reasoning [level] - pick or set the classifier reasoning level" },
 ];
 
 /**
@@ -69,6 +70,9 @@ export function registerCommands(pi: ExtensionAPI, gate: Gate, getContext: () =>
             return;
           }
           ctx.ui.notify("cruise-control on - classifying tool calls", "info");
+
+          // Enabling can be the step that completes setup.
+          notifyIfInstructionsWritten(gate, ctx);
           return;
         }
 
@@ -81,6 +85,9 @@ export function registerCommands(pi: ExtensionAPI, gate: Gate, getContext: () =>
           const resolved = resolveModel(config, ctx);
           if (resolved) ctx.ui.notify(`cruise-control model set to ${chosen}`, "info");
           else ctx.ui.notify(`cruise-control model set to ${chosen}, but it is not available yet`, "warning");
+
+          // Choosing a model can be the step that completes setup.
+          notifyIfInstructionsWritten(gate, ctx);
           return;
         }
 
