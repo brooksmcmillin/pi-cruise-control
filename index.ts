@@ -1,7 +1,9 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveModel } from "./classifier";
 import { registerCommands } from "./commands";
+import { saveGlobalField } from "./config";
 import { blockReason, Gate } from "./gate";
+import { canPrompt, readAvailable, selectModel } from "./selectors";
 
 /**
  * Auto-classifies every tool call and blocks the ones that fail the policy.
@@ -22,6 +24,7 @@ import { blockReason, Gate } from "./gate";
 export default function (pi: ExtensionAPI) {
   const gate = new Gate(process.cwd());
   let lastContext: ExtensionContext | undefined;
+  let askedForModel = false;
 
   registerCommands(pi, gate, () => lastContext);
 
@@ -35,6 +38,14 @@ export default function (pi: ExtensionAPI) {
     // Log pruning is deferred to session start so the extension holds no timers.
     void gate.pruneLogs().catch(() => undefined);
 
+    // Offer to pick a classifier model when none is configured. Not awaited: a modal
+    // must not sit in front of session startup, and the gate works meanwhile by
+    // falling back to the session model.
+    if (!config.model && canPrompt(ctx) && readAvailable(ctx).length > 0) {
+      void promptForModel(ctx).catch(() => undefined);
+      return;
+    }
+
     if (!resolveModel(config, ctx)) {
       const detail = config.model ? `"${config.model}" is unavailable` : "no model is selected";
       ctx.ui.notify(
@@ -43,6 +54,28 @@ export default function (pi: ExtensionAPI) {
       );
     }
   });
+
+  /** Ask once per session, and only when there is something to choose from. */
+  async function promptForModel(ctx: ExtensionContext): Promise<void> {
+    if (askedForModel) return;
+    askedForModel = true;
+
+    const wanted = await ctx.ui.confirm(
+      "cruise-control has no classifier model",
+      "It will classify tool calls with the session model. Pick a dedicated one now?",
+    );
+    if (!wanted) {
+      ctx.ui.notify("cruise-control will use the session model (/cruise-control model to change)", "info");
+      return;
+    }
+
+    const picked = await selectModel(ctx, undefined);
+    if (!picked) return;
+
+    saveGlobalField("model", picked);
+    gate.reloadConfig(ctx.cwd);
+    ctx.ui.notify(`cruise-control model set to ${picked}`, "info");
+  }
 
   pi.on("tool_call", async (event, ctx) => {
     lastContext = ctx;

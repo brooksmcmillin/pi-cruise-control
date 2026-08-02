@@ -3,6 +3,7 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@e
 import { resolveModel } from "./classifier";
 import { isReasoning, REASONING_LEVELS, saveGlobalField } from "./config";
 import type { Gate } from "./gate";
+import { canPrompt, readAvailable, selectModel, selectReasoning } from "./selectors";
 import type { SessionStats } from "./stats";
 import { LEVELS, type Level } from "./types";
 
@@ -84,13 +85,24 @@ export function registerCommands(pi: ExtensionAPI, gate: Gate, getContext: () =>
         }
 
         case "reasoning": {
-          if (!isReasoning(value)) {
+          let level = value;
+          if (!level) {
+            if (!canPrompt(ctx)) {
+              ctx.ui.notify(`Usage: /cruise-control reasoning <${REASONING_LEVELS.join("|")}>`, "warning");
+              return;
+            }
+            const picked = await selectReasoning(ctx, gate.getConfig().reasoning);
+            if (!picked) return;
+            level = picked;
+          }
+          if (!isReasoning(level)) {
             ctx.ui.notify(`Usage: /cruise-control reasoning <${REASONING_LEVELS.join("|")}>`, "warning");
             return;
           }
-          saveGlobalField("reasoning", value);
+
+          saveGlobalField("reasoning", level);
           gate.reloadConfig(ctx.cwd);
-          ctx.ui.notify(`cruise-control reasoning set to ${value}`, "info");
+          ctx.ui.notify(`cruise-control reasoning set to ${level}`, "info");
           return;
         }
 
@@ -104,25 +116,13 @@ export function registerCommands(pi: ExtensionAPI, gate: Gate, getContext: () =>
   });
 }
 
-const CURRENT_MARKER = "  (current)";
-
 /**
  * Offer the models whose providers have resolved auth — the same set pi treats as
  * usable — so `/cruise-control model` is a pick list rather than a name to remember.
  * Returns undefined when the user cancels or there is nothing to pick from.
  */
 async function pickModel(gate: Gate, ctx: ExtensionCommandContext): Promise<string | undefined> {
-  let names: string[];
-  try {
-    names = ctx.modelRegistry
-      .getAvailable()
-      .map((model) => `${model.provider}/${model.id}`)
-      .sort((a, b) => a.localeCompare(b));
-  } catch {
-    names = [];
-  }
-
-  if (names.length === 0) {
+  if (readAvailable(ctx).length === 0) {
     ctx.ui.notify(
       "No models available - log in to a provider, or name one directly: /cruise-control model <provider/model-id>",
       "warning",
@@ -130,13 +130,12 @@ async function pickModel(gate: Gate, ctx: ExtensionCommandContext): Promise<stri
     return undefined;
   }
 
-  const current = gate.getConfig().model;
-  const selected = await ctx.ui.select(
-    "cruise-control classifier model",
-    names.map((name) => (name === current ? `${name}${CURRENT_MARKER}` : name)),
-  );
+  if (!canPrompt(ctx)) {
+    ctx.ui.notify("Usage: /cruise-control model <provider/model-id>", "warning");
+    return undefined;
+  }
 
-  return selected?.endsWith(CURRENT_MARKER) ? selected.slice(0, -CURRENT_MARKER.length) : selected;
+  return selectModel(ctx, gate.getConfig().model);
 }
 
 function completions(prefix: string, ctx: ExtensionContext | undefined): AutocompleteItem[] | null {

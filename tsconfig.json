@@ -18,6 +18,7 @@
     "commands.ts",
     "config.ts",
     "gate.ts",
+    "selectors.ts",
     "limiter.ts",
     "stats.ts",
     "types.ts"

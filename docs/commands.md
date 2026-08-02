@@ -6,7 +6,7 @@
 /cruise-control off                    let every tool call through unclassified
 /cruise-control stats                  session counters and averages
 /cruise-control model [provider/id]    pick from available models, or set one directly
-/cruise-control reasoning <level>      set the reasoning level
+/cruise-control reasoning [level]      pick a reasoning level, or set one directly
 ```
 
 Everything except `stats` writes to the **global** settings file, preserving every other key in it,
@@ -25,24 +25,40 @@ that happens the command says so rather than reporting a state change that did n
 Wrote enabled=false globally, but this project's .pi/settings.json overrides it. Still on here.
 ```
 
-## model
+## model and reasoning
 
-With no argument, `model` lists the models whose providers have resolved auth — the same set pi
-treats as usable — and marks the current one:
+With no argument, both open a picker that behaves like pi's own selectors: type to fuzzy-search,
+arrows to move, enter to confirm, escape to cancel. The model list holds the models whose providers
+have resolved auth — the same set pi treats as usable — sorted with the current one first and
+preselected:
 
 ```
-cruise-control classifier model
-  anthropic/claude-sonnet-4-5
-  deepinfra/deepseek-ai/DeepSeek-V4-Flash-0731  (current)
-  openai/gpt-5
+Select cruise-control classifier model
+> anthropic/claude-sonnet-4-5                Claude Sonnet 4.5
+  deepinfra/deepseek-ai/DeepSeek-V4-Flash    DeepSeek V4 Flash (current)
+  openai/gpt-5                               GPT-5
 ```
 
-Cancelling changes nothing. Passing a name directly (`/cruise-control model openai/gpt-5`) skips the
-picker, which also lets you name a model that is not available yet — useful when you are about to
-log in to that provider. Both forms warn if the resulting model cannot be resolved.
+These are not pi's built-in components. `ModelSelectorComponent` calls
+`setDefaultModelAndProvider()` when you pick, which would repoint your whole session at the
+classifier model; the picker here is a rebuild of the same interaction without that side effect. The
+reasoning picker *is* pi's `ThinkingSelectorComponent`, which has no such side effect, so it shows
+the same level descriptions you see under `/thinking`.
 
-Argument completion is available on both: `reasoning` from the six thinking levels, `model` from the
-same available-model list.
+Cancelling changes nothing. Passing a value directly (`/cruise-control model openai/gpt-5`) skips
+the picker, which also lets you name a model that is not available yet — useful when you are about
+to log in to that provider. Both forms warn if the resulting model cannot be resolved.
+
+Outside interactive mode there is nothing to draw, so both commands print usage text instead of
+opening a picker. Argument completion works on both.
+
+## First-run prompt
+
+When classification is enabled but no `model` is configured, the extension asks once per session
+whether you want to pick a dedicated classifier model. Declining is fine and is not asked again that
+session: the gate falls back to the session model, and `/cruise-control model` can set one later.
+The prompt is never awaited during session startup, so it cannot delay a session, and it is skipped
+entirely when no models are available or the session is non-interactive.
 
 With no argument, the command reports the configuration actually in force, which is the quickest way
 to confirm that a project override landed:

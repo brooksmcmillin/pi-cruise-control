@@ -52,8 +52,10 @@ Inactive until a `cruise_control` key exists in `~/.pi/agent/settings.json` (glo
 /cruise-control on | off               enable or disable classification
 /cruise-control stats                  session counters and averages
 /cruise-control model [provider/id]    pick from available models, or set one directly
-/cruise-control reasoning <level>      set the reasoning level
+/cruise-control reasoning [level]      pick a reasoning level, or set one directly
 ```
+
+`model` and `reasoning` open a searchable picker when called without an argument.
 
 ## License
 
