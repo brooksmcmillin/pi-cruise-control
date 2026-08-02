@@ -25,6 +25,40 @@ conflicts.
 | `log.retention_days` | `30` | Daily log files older than this are pruned at session start; `0` disables pruning |
 | `instructions.*` | built-in defaults | Four rule lists injected into the classifier prompt |
 
+## A fuller example
+
+```json
+{
+  "cruise_control": {
+    "model": "ollama-cloud/deepseek-v4-flash",
+    "reasoning": "low",
+    "instructions": {
+      "background": [
+        "The user is doing software engineering work in a local project workspace.",
+        "Read, search, and list operations inside the project workspace are normal exploratory work.",
+        "When impact is unclear or irreversible, prefer deny so the host can escalate for human review."
+      ],
+      "allow": [
+        "Allow read, grep, find, and ls tools for files inside the project workspace.",
+        "Allow harmless shell commands that only inspect state or print output without modifying the system.",
+        "Allow routine edits and writes that are clearly scoped to the current project task."
+      ],
+      "conditional": [
+        "Allow git commands that inspect or commit locally, but treat push and history rewrite as higher risk.",
+        "Allow package installs only when they target the current project and do not elevate privileges.",
+        "Deny when a command mixes a mostly safe operation with a clearly destructive flag or target."
+      ],
+      "deny": [
+        "Deny recursive force deletes such as rm -rf or equivalent recursive wipe commands.",
+        "Deny DROP DATABASE, DROP SCHEMA CASCADE, and TRUNCATE TABLE against real data stores.",
+        "Deny force-push to main or master.",
+        "Deny filesystem format commands such as mkfs and dd writes to device paths."
+      ]
+    }
+  }
+}
+```
+
 ## Merge semantics
 
 Scalar keys are overridden individually, so a project file that sets only `reasoning` inherits the
