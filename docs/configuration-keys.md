@@ -8,7 +8,7 @@ conflicts.
 |-----|---------|---------|
 | `enabled` | `true` | `false` leaves every tool call untouched |
 | `model` | session model | `provider/model-id` for the classifier |
-| `reasoning` | `"low"` | `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` |
+| `reasoning` | `"high"` | `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` |
 | `timeout_ms` | `20000` | Budget for a **single attempt**; each retry gets a fresh budget |
 | `on_error` | `"deny"` | Outcome when classification fails: `allow` or `deny` |
 | `skip_tools` | `[]` | Tool names that bypass classification |
@@ -31,7 +31,7 @@ conflicts.
 {
   "cruise_control": {
     "model": "ollama-cloud/deepseek-v4-flash",
-    "reasoning": "low",
+    "reasoning": "high",
     "instructions": {
       "background": [
         "The user is doing software engineering work in a local project workspace.",

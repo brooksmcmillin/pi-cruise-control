@@ -1,5 +1,5 @@
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveModel } from "./classifier";
 import { isReasoning, REASONING_LEVELS, saveGlobalField } from "./config";
 import type { Gate } from "./gate";
@@ -7,15 +7,17 @@ import type { SessionStats } from "./stats";
 import { LEVELS, type Level } from "./types";
 
 const SUBCOMMANDS = [
+  { value: "on", label: "on - classify tool calls" },
+  { value: "off", label: "off - let every tool call through unclassified" },
   { value: "stats", label: "stats - session classification counters" },
-  { value: "model", label: "model <provider/id> - set the classifier model" },
+  { value: "model", label: "model [provider/id] - pick or set the classifier model" },
   { value: "reasoning", label: "reasoning <level> - set the classifier reasoning level" },
 ];
 
 /**
- * `/cruise-control` with no argument reports the effective configuration;
- * `stats`, `model`, and `reasoning` are the documented subcommands. `model` and
- * `reasoning` write to the global settings file and take effect immediately.
+ * `/cruise-control` with no argument reports the effective configuration; `on`, `off`,
+ * `stats`, `model`, and `reasoning` are the documented subcommands. Everything except
+ * `stats` writes to the global settings file and takes effect immediately.
  */
 export function registerCommands(pi: ExtensionAPI, gate: Gate, getContext: () => ExtensionContext | undefined): void {
   pi.registerCommand("cruise-control", {
@@ -34,16 +36,50 @@ export function registerCommands(pi: ExtensionAPI, gate: Gate, getContext: () =>
           ctx.ui.notify(formatStats(gate.stats.snapshot()), "info");
           return;
 
-        case "model": {
-          if (!value) {
-            ctx.ui.notify("Usage: /cruise-control model <provider/model-id>", "warning");
+        case "on":
+        case "off": {
+          const enable = subcommand === "on";
+          // Turning it on when no section exists writes one, which is what makes the
+          // extension active at all — so say which rules the user just opted into.
+          const bootstrapped = enable && !gate.getConfig().configured;
+          saveGlobalField("enabled", enable);
+          const config = gate.reloadConfig(ctx.cwd);
+
+          // The write lands in the global file, which a project file outranks. Say so
+          // rather than reporting a state change that did not happen.
+          if (config.enabled !== enable) {
+            ctx.ui.notify(
+              `Wrote enabled=${enable} globally, but this project's .pi/settings.json overrides it. Still ${config.enabled ? "on" : "off"} here.`,
+              "warning",
+            );
             return;
           }
-          saveGlobalField("model", value);
+
+          if (!enable) {
+            ctx.ui.notify("cruise-control off - tool calls run unclassified", "info");
+            return;
+          }
+          if (bootstrapped) {
+            ctx.ui.notify("cruise-control on - classifying with the built-in default rules", "info");
+            return;
+          }
+          if (!resolveModel(config, ctx)) {
+            ctx.ui.notify("cruise-control on, but no classifier model is available yet", "warning");
+            return;
+          }
+          ctx.ui.notify("cruise-control on - classifying tool calls", "info");
+          return;
+        }
+
+        case "model": {
+          const chosen = value || (await pickModel(gate, ctx));
+          if (!chosen) return;
+
+          saveGlobalField("model", chosen);
           const config = gate.reloadConfig(ctx.cwd);
           const resolved = resolveModel(config, ctx);
-          if (resolved) ctx.ui.notify(`cruise-control model set to ${value}`, "info");
-          else ctx.ui.notify(`cruise-control model set to ${value}, but it is not available yet`, "warning");
+          if (resolved) ctx.ui.notify(`cruise-control model set to ${chosen}`, "info");
+          else ctx.ui.notify(`cruise-control model set to ${chosen}, but it is not available yet`, "warning");
           return;
         }
 
@@ -59,10 +95,48 @@ export function registerCommands(pi: ExtensionAPI, gate: Gate, getContext: () =>
         }
 
         default:
-          ctx.ui.notify(`Unknown subcommand "${subcommand}". Try stats, model, or reasoning.`, "warning");
+          ctx.ui.notify(
+            `Unknown subcommand "${subcommand}". Try on, off, stats, model, or reasoning.`,
+            "warning",
+          );
       }
     },
   });
+}
+
+const CURRENT_MARKER = "  (current)";
+
+/**
+ * Offer the models whose providers have resolved auth — the same set pi treats as
+ * usable — so `/cruise-control model` is a pick list rather than a name to remember.
+ * Returns undefined when the user cancels or there is nothing to pick from.
+ */
+async function pickModel(gate: Gate, ctx: ExtensionCommandContext): Promise<string | undefined> {
+  let names: string[];
+  try {
+    names = ctx.modelRegistry
+      .getAvailable()
+      .map((model) => `${model.provider}/${model.id}`)
+      .sort((a, b) => a.localeCompare(b));
+  } catch {
+    names = [];
+  }
+
+  if (names.length === 0) {
+    ctx.ui.notify(
+      "No models available - log in to a provider, or name one directly: /cruise-control model <provider/model-id>",
+      "warning",
+    );
+    return undefined;
+  }
+
+  const current = gate.getConfig().model;
+  const selected = await ctx.ui.select(
+    "cruise-control classifier model",
+    names.map((name) => (name === current ? `${name}${CURRENT_MARKER}` : name)),
+  );
+
+  return selected?.endsWith(CURRENT_MARKER) ? selected.slice(0, -CURRENT_MARKER.length) : selected;
 }
 
 function completions(prefix: string, ctx: ExtensionContext | undefined): AutocompleteItem[] | null {
@@ -107,10 +181,10 @@ function formatConfig(gate: Gate, ctx: ExtensionContext): string {
   const config = gate.getConfig();
   const resolved = resolveModel(config, ctx);
   const status = !config.configured
-    ? "inactive - no cruise_control section in settings.json"
+    ? "inactive - not configured (/cruise-control on to start with default rules)"
     : config.enabled
-      ? "active"
-      : "disabled by config";
+      ? "on"
+      : "off (/cruise-control on to enable)";
 
   const model = config.model
     ? `${config.model}${resolved ? "" : " (unavailable)"}`

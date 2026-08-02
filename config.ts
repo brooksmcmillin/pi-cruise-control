@@ -106,7 +106,9 @@ function defaults(): CruiseControlConfig {
   return {
     enabled: true,
     model: undefined,
-    reasoning: "low",
+    // Gate decisions are cheap relative to the tool calls they guard, and a shallow
+    // read of a mixed safe/destructive command is exactly how a bad approval happens.
+    reasoning: "high",
     timeoutMs: 20_000,
     onError: "deny",
     skipTools: [],
@@ -147,8 +149,14 @@ export function loadConfig(cwd: string): CruiseControlConfig {
   return config;
 }
 
-/** Persist a single scalar field to the global settings file, preserving everything else. */
-export function saveGlobalField(field: "model" | "reasoning", value: string): void {
+/**
+ * Persist a single scalar field to the global settings file, preserving everything else.
+ *
+ * Writing the `cruise_control` section is safe alongside pi's own settings writes: pi
+ * re-reads the file and merges only the fields it modified, so neither side clobbers
+ * the other.
+ */
+export function saveGlobalField(field: "model" | "reasoning" | "enabled", value: string | boolean): void {
   const path = globalSettingsPath();
   const settings = readJson(path) ?? {};
   const existing = settings[SETTINGS_KEY];

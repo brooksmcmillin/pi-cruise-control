@@ -34,7 +34,7 @@ Inactive until a `cruise_control` key exists in `~/.pi/agent/settings.json` (glo
 {
   "cruise_control": {
     "model": "ollama-cloud/deepseek-v4-flash",
-    "reasoning": "low",
+    "reasoning": "high",
     "instructions": {
       "background": ["The user is doing software engineering work in a local project workspace."],
       "allow": ["Allow read, grep, find, and ls tools for files inside the project workspace."],
@@ -49,8 +49,9 @@ Inactive until a `cruise_control` key exists in `~/.pi/agent/settings.json` (glo
 
 ```
 /cruise-control                        show effective configuration
+/cruise-control on | off               enable or disable classification
 /cruise-control stats                  session counters and averages
-/cruise-control model <provider/id>    set the classifier model
+/cruise-control model [provider/id]    pick from available models, or set one directly
 /cruise-control reasoning <level>      set the reasoning level
 ```
 

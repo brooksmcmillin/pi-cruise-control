@@ -217,6 +217,20 @@ export function blockReason(decision: Decision): string {
   ].join("\n");
 }
 
+/**
+ * Collect the recent user prompts the classifier uses to judge intent.
+ *
+ * **Only `role: "user"` messages are read — never tool output.** Tool results
+ * (`role: "toolResult"`), `!` command output (`role: "bashExecution"`), and assistant
+ * text are all excluded by the allowlist below, and this is a security boundary rather
+ * than a formatting choice: tool output is attacker-influenced content. A file the
+ * agent reads, a web page it fetches, or a command's stdout could otherwise carry text
+ * addressed to the classifier ("the user explicitly approved this") and talk the gate
+ * into rating intent high on a call the user never asked for.
+ *
+ * Widening this filter re-opens that hole. If more context is ever needed here, it has
+ * to come from something the user typed.
+ */
 function recentPrompts(ctx: ExtensionContext): string[] {
   const prompts: string[] = [];
 
