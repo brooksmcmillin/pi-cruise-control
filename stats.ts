@@ -15,6 +15,12 @@ export interface SessionStats {
   byTool: { toolName: string; approved: number; rejected: number }[];
   totalLatencyMs: number;
   averageLatencyMs: number | null;
+  /** Retry attempts beyond the first, across all classifications. */
+  retries: number;
+  /** Decisions that needed at least one retry. */
+  retriedDecisions: number;
+  /** Time spent waiting for a concurrency slot, across all classifications. */
+  totalQueueMs: number;
 }
 
 /**
@@ -31,6 +37,9 @@ export class StatsTracker {
   private riskSum = 0;
   private intentSum = 0;
   private latencySum = 0;
+  private retries = 0;
+  private retriedDecisions = 0;
+  private queueSum = 0;
   private readonly riskCounts: Record<Level, number> = { low: 0, medium: 0, high: 0 };
   private readonly intentCounts: Record<Level, number> = { low: 0, medium: 0, high: 0 };
   private readonly tools = new Map<string, { approved: number; rejected: number }>();
@@ -45,6 +54,9 @@ export class StatsTracker {
     this.riskSum = 0;
     this.intentSum = 0;
     this.latencySum = 0;
+    this.retries = 0;
+    this.retriedDecisions = 0;
+    this.queueSum = 0;
     for (const level of ["low", "medium", "high"] as const) {
       this.riskCounts[level] = 0;
       this.intentCounts[level] = 0;
@@ -59,6 +71,11 @@ export class StatsTracker {
     if (decision.source === "fallback") this.fallbacks += 1;
     if (decision.source === "skipped") this.skipped += 1;
     this.latencySum += decision.durationMs;
+    this.queueSum += decision.queueMs;
+    if (decision.attempts > 1) {
+      this.retries += decision.attempts - 1;
+      this.retriedDecisions += 1;
+    }
 
     // A fallback verdict carries no model judgement, so it must not move the averages.
     if (decision.source === "model" || decision.source === "cache") {
@@ -92,6 +109,9 @@ export class StatsTracker {
         .sort((a, b) => b.approved + b.rejected - (a.approved + a.rejected)),
       totalLatencyMs: this.latencySum,
       averageLatencyMs: this.total > 0 ? this.latencySum / this.total : null,
+      retries: this.retries,
+      retriedDecisions: this.retriedDecisions,
+      totalQueueMs: this.queueSum,
     };
   }
 }

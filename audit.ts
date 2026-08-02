@@ -21,6 +21,8 @@ export interface AuditRecord {
   reason: string;
   source: string;
   durationMs: number;
+  attempts: number;
+  queueMs: number;
   model?: string;
   error?: string;
 }
@@ -56,6 +58,8 @@ export class AuditLog {
       reason: decision.reason,
       source: decision.source,
       durationMs: decision.durationMs,
+      attempts: decision.attempts,
+      queueMs: decision.queueMs,
     };
 
     this.queue = this.queue

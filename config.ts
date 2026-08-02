@@ -28,6 +28,14 @@ export interface CacheConfig {
   maxEntries: number;
 }
 
+export interface RetryConfig {
+  /** Extra attempts after the first. 0 disables retrying. */
+  attempts: number;
+  /** Base backoff before the first retry; doubles per attempt, with full jitter. */
+  initialDelayMs: number;
+  maxDelayMs: number;
+}
+
 export interface LogConfig {
   enabled: boolean;
   /** Absolute directory for audit logs. Defaults to `<agentDir>/cruise-control`. */
@@ -42,11 +50,15 @@ export interface CruiseControlConfig {
   /** `provider/modelId`. Falls back to the session model when unset or unresolvable. */
   model?: string;
   reasoning: ThinkingLevel;
+  /** Budget for a single classification attempt; retries each get a fresh budget. */
   timeoutMs: number;
   /** What to do when classification cannot produce a verdict. */
   onError: "allow" | "deny";
   /** Tool names that bypass classification entirely. */
   skipTools: string[];
+  retry: RetryConfig;
+  /** Classifications allowed in flight at once. 0 means unlimited. */
+  maxConcurrent: number;
   cache: CacheConfig;
   log: LogConfig;
   instructions: Instructions;
@@ -98,6 +110,8 @@ function defaults(): CruiseControlConfig {
     timeoutMs: 20_000,
     onError: "deny",
     skipTools: [],
+    retry: { attempts: 2, initialDelayMs: 500, maxDelayMs: 4000 },
+    maxConcurrent: 0,
     cache: { enabled: true, ttlMs: 30 * 60_000, maxEntries: 500 },
     log: { enabled: true, dir: join(getAgentDir(), "cruise-control"), retentionDays: 30 },
     instructions: DEFAULT_INSTRUCTIONS,
@@ -162,6 +176,23 @@ function applySection(config: CruiseControlConfig, raw: RawRecord): void {
   if (isPositiveNumber(raw.timeout_ms)) config.timeoutMs = raw.timeout_ms;
   if (raw.on_error === "allow" || raw.on_error === "deny") config.onError = raw.on_error;
   if (Array.isArray(raw.skip_tools)) config.skipTools = stringArray(raw.skip_tools);
+
+  // `parallel` is the coarse switch (false means one at a time); `max_concurrent` is the
+  // precise value and is applied second so it wins whenever both appear in one scope.
+  if (raw.parallel === false) config.maxConcurrent = 1;
+  else if (raw.parallel === true) config.maxConcurrent = 0;
+  if (typeof raw.max_concurrent === "number" && raw.max_concurrent >= 0) {
+    config.maxConcurrent = Math.floor(raw.max_concurrent);
+  }
+
+  const retry = section(raw.retry);
+  if (retry) {
+    if (typeof retry.attempts === "number" && retry.attempts >= 0) {
+      config.retry.attempts = Math.floor(retry.attempts);
+    }
+    if (isPositiveNumber(retry.initial_delay_ms)) config.retry.initialDelayMs = retry.initial_delay_ms;
+    if (isPositiveNumber(retry.max_delay_ms)) config.retry.maxDelayMs = retry.max_delay_ms;
+  }
 
   const cache = section(raw.cache);
   if (cache) {

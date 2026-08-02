@@ -31,8 +31,12 @@ export type DecisionSource = "cache" | "model" | "fallback" | "skipped";
 export interface Decision extends Classification {
   approved: boolean;
   source: DecisionSource;
-  /** Wall-clock time spent classifying, in milliseconds. */
+  /** Wall-clock time from gate entry to verdict, including queue wait and retries. */
   durationMs: number;
+  /** Classification attempts made. 0 for cache hits and skips, 1 when no retry was needed. */
+  attempts: number;
+  /** Time spent waiting for a concurrency slot, in milliseconds. */
+  queueMs: number;
 }
 
 /** Everything the classifier is allowed to see about a pending tool call. */

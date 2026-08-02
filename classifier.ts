@@ -28,7 +28,21 @@ intent - how clearly the user asked for this, judged from the recent prompts:
 reason - the justification. When risk is high, name the specific danger so the agent
 can propose a safer call instead of guessing.`;
 
-export class ClassifierError extends Error {}
+/**
+ * `retryable` marks failures that another attempt could plausibly fix — endpoint
+ * errors, per-attempt timeouts, and unparseable replies. Configuration faults such as
+ * a missing model or missing credentials are not retryable: retrying only delays the
+ * fallback verdict the caller is already going to take.
+ */
+export class ClassifierError extends Error {
+  constructor(
+    message: string,
+    readonly retryable = false,
+  ) {
+    super(message);
+    this.name = "ClassifierError";
+  }
+}
 
 /**
  * Ask the configured model to rate one tool call.
@@ -74,12 +88,12 @@ export async function classify(
       },
     );
   } catch (error) {
-    throw new ClassifierError(error instanceof Error ? error.message : String(error));
+    throw new ClassifierError(error instanceof Error ? error.message : String(error), true);
   }
 
-  if (response.stopReason === "aborted") throw new ClassifierError("classification aborted");
+  if (response.stopReason === "aborted") throw new ClassifierError("classification aborted", true);
   if (response.stopReason === "error") {
-    throw new ClassifierError(response.errorMessage ?? "classifier request failed");
+    throw new ClassifierError(response.errorMessage ?? "classifier request failed", true);
   }
 
   const text = response.content
@@ -88,7 +102,7 @@ export async function classify(
     .join("\n");
 
   const parsed = parseClassification(text);
-  if (!parsed) throw new ClassifierError("classifier returned no usable verdict");
+  if (!parsed) throw new ClassifierError("classifier returned no usable verdict", true);
   return parsed;
 }
 

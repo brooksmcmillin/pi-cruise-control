@@ -122,7 +122,9 @@ function formatConfig(gate: Gate, ctx: ExtensionContext): string {
     `  status     ${status}`,
     `  model      ${model}`,
     `  reasoning  ${config.reasoning}`,
-    `  timeout    ${config.timeoutMs}ms, on failure: ${config.onError}`,
+    `  timeout    ${config.timeoutMs}ms per attempt, on failure: ${config.onError}`,
+    `  retry      ${config.retry.attempts > 0 ? `up to ${config.retry.attempts} retries, backoff ${config.retry.initialDelayMs}-${config.retry.maxDelayMs}ms` : "off"}`,
+    `  parallel   ${config.maxConcurrent === 0 ? "unlimited" : config.maxConcurrent === 1 ? "off (one at a time)" : `max ${config.maxConcurrent} in flight`}`,
     `  cache      ${config.cache.enabled ? `on, ttl ${formatDuration(config.cache.ttlMs)}, ${gate.cacheSize}/${config.cache.maxEntries} entries` : "off"}`,
     `  log        ${config.log.enabled ? `on, ${config.log.retentionDays}d retention, ${config.log.dir}` : "off"}`,
     `  rules      background ${rules.background.length}, allow ${rules.allow.length}, conditional ${rules.conditional.length}, deny ${rules.deny.length}`,
@@ -145,6 +147,13 @@ function formatStats(stats: SessionStats): string {
     `  intent     ${formatCounts(stats.intentCounts)}`,
     `  latency    avg ${formatMs(stats.averageLatencyMs)} over ${formatMs(stats.totalLatencyMs)} total`,
   ];
+
+  if (stats.retries > 0) {
+    lines.push(`  retries    ${stats.retries} across ${stats.retriedDecisions} decisions`);
+  }
+  if (stats.totalQueueMs > 0) {
+    lines.push(`  queued     ${formatMs(stats.totalQueueMs)} waiting for a slot`);
+  }
 
   if (stats.byTool.length > 0) {
     const tools = stats.byTool

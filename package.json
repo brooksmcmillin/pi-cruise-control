@@ -28,6 +28,7 @@
     "commands.ts",
     "config.ts",
     "gate.ts",
+    "limiter.ts",
     "stats.ts",
     "types.ts",
     "README.md",
