@@ -11,23 +11,24 @@ guessing.
 | `risk` | What happens if this runs? | `low` / `medium` / `high` |
 | `intent` | How clearly did the user ask for it? | `low` / `medium` / `high` |
 
-**A call is approved when risk is `low`, or intent is `high`, or both are `medium`.**
+A call is approved when risk is `low`, or intent is `high`, or both are `medium`:
 
-Note what the second clause means in practice: **intent is an override**. An action the user
-explicitly asked for is approved even when the classifier rates it high risk — the rule reads an
-explicit request as the human authorization. If you want deny rules to be absolute regardless of
-what the user typed, this is not the policy you want.
+| risk ↓ / intent → | `low` | `medium` | `high` |
+|---|---|---|---|
+| **`low`** | approve | approve | approve |
+| **`medium`** | deny | approve | approve |
+| **`high`** | deny | deny | approve |
+
+Note the right-hand column: **intent is an override**. An action the user explicitly asked for is
+approved even when the classifier rates it high risk — the rule reads an explicit request as the
+human authorization. If you want deny rules to be absolute regardless of what the user typed, this
+is not the policy you want.
 
 ## Install
 
 ```bash
-pi install pi-cruise-control
-```
-
-Or load it directly during development:
-
-```bash
-pi -e ./index.ts
+pi install git:github.com/puetsua/pi-cruise-control
+pi install git:github.com/puetsua/pi-cruise-control@0.1.0   # pinned to a tag
 ```
 
 ## Configure
@@ -71,29 +72,6 @@ then the project file, with the project winning:
 }
 ```
 
-### Keys
-
-| Key | Default | Meaning |
-|-----|---------|---------|
-| `enabled` | `true` | `false` leaves every tool call untouched |
-| `model` | session model | `provider/model-id` for the classifier |
-| `reasoning` | `"low"` | `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` |
-| `timeout_ms` | `20000` | Budget for a **single attempt**; each retry gets a fresh budget |
-| `on_error` | `"deny"` | Outcome when classification fails: `allow` or `deny` |
-| `skip_tools` | `[]` | Tool names that bypass classification |
-| `retry.attempts` | `2` | Extra attempts after the first; `0` disables retrying |
-| `retry.initial_delay_ms` | `500` | Base backoff, doubled per attempt |
-| `retry.max_delay_ms` | `4000` | Backoff ceiling |
-| `parallel` | `true` | `false` classifies one tool call at a time |
-| `max_concurrent` | `0` | Classifications in flight at once; `0` is unlimited |
-| `cache.enabled` | `true` | Cache low-risk verdicts |
-| `cache.ttl_ms` | `1800000` | Cached verdict lifetime (30 min) |
-| `cache.max_entries` | `500` | LRU bound |
-| `log.enabled` | `true` | Write the audit trail |
-| `log.dir` | `<agent-dir>/cruise-control` | Audit log directory |
-| `log.retention_days` | `30` | Daily log files older than this are pruned at session start; `0` disables pruning |
-| `instructions.*` | built-in defaults | Four rule lists injected into the classifier prompt |
-
 Each `instructions` list is **replaced**, not merged, when a project overrides it: setting
 `deny` in a project file means "these are the deny rules", not "these as well".
 
@@ -123,64 +101,6 @@ cruise-control - session stats
 
 Counters reset at every session start. Averages cover model and cache decisions only — a
 `fallback` carries no model judgement, so it is counted but never folded into the averages.
-
-## Retries and request pressure
-
-A stalled or erroring endpoint is retried with exponential backoff and full jitter —
-`500ms`, `1s`, `2s`, capped at `max_delay_ms`, each delay randomized across its range so
-sibling tool calls do not resynchronize into a burst. **`timeout_ms` is per attempt**, so
-the default configuration is willing to spend up to three attempts before falling back.
-
-Retrying stops immediately for faults another attempt cannot fix (no model available, no
-credentials) and whenever the turn is cancelled — pressing Esc is never answered with a
-backoff loop. Endpoint errors, per-attempt timeouts, and unparseable replies are retried.
-
-Concurrency is capped by `max_concurrent`, and `"parallel": false` is the plain-language
-spelling of a cap of one. When both appear in the same settings file, `max_concurrent`
-wins. Cache hits never queue, so a repeat `read` is not held behind an in-flight request.
-
-Worth knowing: pi already preflights sibling tool calls **sequentially** (`beforeToolCall`
-is awaited in a `for` loop), so classifications do not overlap under the stock host and
-the cap rarely engages. It is here so the ceiling is a property of this extension rather
-than an inherited scheduling detail, and so retries cannot stack up behind a slow endpoint.
-
-## Caching
-
-Only **low-risk** verdicts are cached, keyed by tool name, canonicalized arguments, and a
-fingerprint of the model plus instructions. Repeating a `read` or `ls` is the common case and a
-cache hit there saves a model round trip; anything rated medium or high is re-judged every time,
-because the intent half of the verdict depends on prompts that keep moving. Editing the
-instructions or the model retires every cached approval rather than letting it outlive the rules
-that produced it.
-
-## Audit log
-
-Every decision is appended as one JSON line to `<log.dir>/cruise-control-YYYY-MM-DD.jsonl`:
-
-```json
-{"timestamp":"2026-08-02T07:38:18.315Z","toolName":"bash","toolCallId":"call_01","cwd":"/project",
- "input":"{\"command\":\"ls\"}","approved":true,"risk":"low","intent":"high",
- "reason":"User explicitly asked to list files with ls; read-only and safe.",
- "source":"model","durationMs":1443,"attempts":1,"queueMs":0,"model":"deepseek-v4-flash"}
-```
-
-`source` is `model`, `cache`, `skipped`, or `fallback` (classification never produced a verdict and
-`on_error` decided). Writes are queued so concurrent tool calls cannot interleave partial lines, and
-every log failure is swallowed — an unwritable log directory must never be able to fail a tool call.
-
-## Failure behavior
-
-When the classifier cannot produce a verdict — no model available, request error, timeout, or
-unparseable output — retries are exhausted first and then the outcome comes from `on_error`, which
-defaults to `deny`. Denials name the cause and the attempt count so the agent can react:
-
-```
-cruise-control denied this tool call (risk=high, intent=low): Classification unavailable
-after 3 attempts (classification aborted); denied by fallback policy.
-Retry with a safer, narrower tool call, or use the ask tool to request human review.
-```
-
-Set `on_error` to `"allow"` if you would rather a classifier outage not block your session.
 
 ## License
 

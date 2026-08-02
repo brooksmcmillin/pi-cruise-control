@@ -1,0 +1,50 @@
+# Configuration keys
+
+Every key below lives under the `cruise_control` object in `~/.pi/agent/settings.json` (global) or
+`<project>/.pi/settings.json` (project). The global file is read first and the project file wins on
+conflicts.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `enabled` | `true` | `false` leaves every tool call untouched |
+| `model` | session model | `provider/model-id` for the classifier |
+| `reasoning` | `"low"` | `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` |
+| `timeout_ms` | `20000` | Budget for a **single attempt**; each retry gets a fresh budget |
+| `on_error` | `"deny"` | Outcome when classification fails: `allow` or `deny` |
+| `skip_tools` | `[]` | Tool names that bypass classification |
+| `retry.attempts` | `2` | Extra attempts after the first; `0` disables retrying |
+| `retry.initial_delay_ms` | `500` | Base backoff, doubled per attempt |
+| `retry.max_delay_ms` | `4000` | Backoff ceiling |
+| `parallel` | `true` | `false` classifies one tool call at a time |
+| `max_concurrent` | `0` | Classifications in flight at once; `0` is unlimited |
+| `cache.enabled` | `true` | Cache low-risk verdicts |
+| `cache.ttl_ms` | `1800000` | Cached verdict lifetime (30 min) |
+| `cache.max_entries` | `500` | LRU bound |
+| `log.enabled` | `true` | Write the audit trail |
+| `log.dir` | `<agent-dir>/cruise-control` | Audit log directory |
+| `log.retention_days` | `30` | Daily log files older than this are pruned at session start; `0` disables pruning |
+| `instructions.*` | built-in defaults | Four rule lists injected into the classifier prompt |
+
+## Merge semantics
+
+Scalar keys are overridden individually, so a project file that sets only `reasoning` inherits the
+rest of the global configuration. Nested objects (`retry`, `cache`, `log`) merge key by key for the
+same reason.
+
+Each `instructions` list, however, is **replaced rather than merged**: setting `deny` in a project
+file means "these are the deny rules", not "these as well". Rule lists are read as a complete policy
+statement, and silently appending to an inherited deny list would make a project's policy depend on
+a global file its author may never have seen.
+
+## Instruction lists
+
+The four lists become the four labelled sections of the classifier's system prompt.
+
+| List | Role |
+|------|------|
+| `background` | Context about the workspace and what normal work looks like |
+| `allow` | Operations that should normally be rated low risk |
+| `conditional` | Cases to judge individually, including mixed safe/destructive commands |
+| `deny` | Operations to treat as high risk |
+
+Empty lists are omitted from the prompt entirely rather than emitted as an empty heading.
