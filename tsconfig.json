@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "lib": ["esnext"],
+    "types": ["node"],
+    "strict": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": [
+    "index.ts",
+    "audit.ts",
+    "cache.ts",
+    "classifier.ts",
+    "commands.ts",
+    "config.ts",
+    "gate.ts",
+    "stats.ts",
+    "types.ts"
+  ]
+}

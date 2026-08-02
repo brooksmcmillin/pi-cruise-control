@@ -1,0 +1,176 @@
+import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { Api, Model, UserMessage } from "@earendil-works/pi-ai";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { CruiseControlConfig, Instructions } from "./config";
+import { type Classification, type ClassificationRequest, isLevel } from "./types";
+
+/** Tool input is truncated before it reaches the classifier; verdicts hinge on shape, not bulk. */
+const MAX_INPUT_CHARS = 4000;
+const MAX_PROMPT_CHARS = 600;
+const MAX_REASON_CHARS = 200;
+const MAX_REASON_WORDS = 20;
+
+const OUTPUT_CONTRACT = `You are a tool-use gate for the pi coding agent. Classify one pending tool call.
+
+Reply with ONE JSON object and nothing else. No prose, no markdown fences:
+{"risk":"low|medium|high","intent":"low|medium|high","reason":"<one sentence, under 20 words>"}
+
+risk - potential impact of running this tool call:
+  low    = read-only, trivially reversible, or confined to scratch state
+  medium = local mutation inside the workspace that a human could undo
+  high   = destructive, irreversible, privileged, remote, or outside the workspace
+
+intent - how clearly the user asked for this, judged from the recent prompts:
+  low    = unrelated to anything the user asked for
+  medium = a plausible step toward the user's request
+  high   = the user explicitly asked for this action
+
+reason - the justification. When risk is high, name the specific danger so the agent
+can propose a safer call instead of guessing.`;
+
+export class ClassifierError extends Error {}
+
+/**
+ * Ask the configured model to rate one tool call.
+ *
+ * Rejects with `ClassifierError` when no model resolves, auth is missing, the call
+ * aborts or times out, or the reply is not a usable verdict. The gate turns that
+ * into the configured `onError` outcome.
+ */
+export async function classify(
+  request: ClassificationRequest,
+  config: CruiseControlConfig,
+  ctx: ExtensionContext,
+  signal: AbortSignal,
+): Promise<Classification> {
+  const model = resolveModel(config, ctx);
+  if (!model) {
+    throw new ClassifierError(
+      config.model ? `classifier model "${config.model}" is not available` : "no classifier model selected",
+    );
+  }
+
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+  if (!auth.ok) throw new ClassifierError(auth.error);
+
+  const message: UserMessage = {
+    role: "user",
+    content: [{ type: "text", text: buildPayload(request) }],
+    timestamp: Date.now(),
+  };
+
+  let response: Awaited<ReturnType<typeof completeSimple>>;
+  try {
+    response = await completeSimple(
+      model,
+      { systemPrompt: buildSystemPrompt(config.instructions), messages: [message] },
+      {
+        apiKey: auth.apiKey,
+        headers: auth.headers,
+        env: auth.env,
+        reasoning: config.reasoning,
+        temperature: 0,
+        signal,
+      },
+    );
+  } catch (error) {
+    throw new ClassifierError(error instanceof Error ? error.message : String(error));
+  }
+
+  if (response.stopReason === "aborted") throw new ClassifierError("classification aborted");
+  if (response.stopReason === "error") {
+    throw new ClassifierError(response.errorMessage ?? "classifier request failed");
+  }
+
+  const text = response.content
+    .filter((part): part is { type: "text"; text: string } => part.type === "text")
+    .map((part) => part.text)
+    .join("\n");
+
+  const parsed = parseClassification(text);
+  if (!parsed) throw new ClassifierError("classifier returned no usable verdict");
+  return parsed;
+}
+
+/** Resolve `provider/modelId` against the registry, falling back to the session model. */
+export function resolveModel(config: CruiseControlConfig, ctx: ExtensionContext): Model<Api> | undefined {
+  if (!config.model) return ctx.model;
+
+  const separator = config.model.indexOf("/");
+  if (separator <= 0) return ctx.model;
+
+  const provider = config.model.slice(0, separator);
+  const modelId = config.model.slice(separator + 1);
+  return ctx.modelRegistry.find(provider, modelId) ?? undefined;
+}
+
+export function buildSystemPrompt(instructions: Instructions): string {
+  const sections: string[] = [OUTPUT_CONTRACT];
+  const append = (title: string, lines: string[]) => {
+    if (lines.length > 0) sections.push(`${title}\n${lines.map((line) => `- ${line}`).join("\n")}`);
+  };
+
+  append("Background:", instructions.background);
+  append("Allow (normally low risk):", instructions.allow);
+  append("Conditional (judge case by case):", instructions.conditional);
+  append("Deny (treat as high risk):", instructions.deny);
+
+  return sections.join("\n\n");
+}
+
+function buildPayload(request: ClassificationRequest): string {
+  const payload = {
+    tool: request.toolName,
+    input: truncate(safeJson(request.input), MAX_INPUT_CHARS),
+    cwd: request.cwd,
+    recent_user_prompts: request.recentPrompts.map((prompt) => truncate(prompt, MAX_PROMPT_CHARS)),
+  };
+  return `Tool call to classify:\n${JSON.stringify(payload, null, 2)}`;
+}
+
+/**
+ * Pull a verdict out of the reply. Models wrap JSON in fences or commentary often
+ * enough that scanning for the outermost object is worth the leniency.
+ */
+export function parseClassification(text: string): Classification | undefined {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) return undefined;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return undefined;
+  }
+
+  if (!parsed || typeof parsed !== "object") return undefined;
+  const candidate = parsed as Record<string, unknown>;
+  if (!isLevel(candidate.risk) || !isLevel(candidate.intent)) return undefined;
+
+  const reason = typeof candidate.reason === "string" ? candidate.reason.trim() : "";
+  return {
+    risk: candidate.risk,
+    intent: candidate.intent,
+    reason: clampReason(reason || "no reason given"),
+  };
+}
+
+function clampReason(reason: string): string {
+  const collapsed = reason.replace(/\s+/g, " ").trim();
+  const words = collapsed.split(" ");
+  const clipped = words.length > MAX_REASON_WORDS ? `${words.slice(0, MAX_REASON_WORDS).join(" ")}…` : collapsed;
+  return truncate(clipped, MAX_REASON_CHARS);
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function truncate(text: string, limit: number): string {
+  return text.length <= limit ? text : `${text.slice(0, limit)}… (truncated)`;
+}

@@ -1,0 +1,58 @@
+{
+  "name": "pi-cruise-control",
+  "version": "0.1.0",
+  "description": "Pi package that auto-approves or denies tool calls with an LLM classifier scoring risk and user intent, with caching, audit logging, and session stats.",
+  "keywords": [
+    "pi-coding-agent",
+    "pi-package",
+    "permissions",
+    "classifier",
+    "security"
+  ],
+  "license": "MIT",
+  "author": "puetsua",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/puetsua/pi-cruise-control.git"
+  },
+  "homepage": "https://github.com/puetsua/pi-cruise-control#readme",
+  "bugs": {
+    "url": "https://github.com/puetsua/pi-cruise-control/issues"
+  },
+  "files": [
+    "index.ts",
+    "audit.ts",
+    "cache.ts",
+    "classifier.ts",
+    "commands.ts",
+    "config.ts",
+    "gate.ts",
+    "stats.ts",
+    "types.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.81.0",
+    "@earendil-works/pi-coding-agent": ">=0.81.0",
+    "@earendil-works/pi-tui": ">=0.81.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": ">=0.81.0",
+    "@earendil-works/pi-coding-agent": ">=0.81.0",
+    "@earendil-works/pi-tui": ">=0.81.0",
+    "@types/node": "*",
+    "typescript": "^5.6.0"
+  }
+}
