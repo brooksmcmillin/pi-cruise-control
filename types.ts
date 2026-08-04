@@ -1,5 +1,13 @@
 /** Shared vocabulary for the classifier, the gate, the cache, and the audit log. */
 
+/**
+ * Read-only diagnostic tool the agent can call to probe the classifier.
+ *
+ * The gate exempts it unconditionally so a broken classifier can never block the
+ * very call that reports on it.
+ */
+export const HEALTH_TOOL_NAME = "cruise_control_health";
+
 /** Three-point scale used for both `risk` and `intent`. */
 export type Level = "low" | "medium" | "high";
 

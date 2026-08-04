@@ -3,6 +3,7 @@ import { resolveModel } from "./classifier";
 import { registerCommands } from "./commands";
 import { saveGlobalField } from "./config";
 import { blockReason, Gate } from "./gate";
+import { registerHealthTool } from "./health";
 import { notifyIfInstructionsWritten } from "./instructions-notice";
 import { canPrompt, readAvailable, selectModel } from "./selectors";
 
@@ -28,6 +29,7 @@ export default function (pi: ExtensionAPI) {
   let askedForModel = false;
 
   registerCommands(pi, gate, () => lastContext);
+  registerHealthTool(pi, gate);
 
   pi.on("session_start", (_event, ctx) => {
     lastContext = ctx;

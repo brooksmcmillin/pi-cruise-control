@@ -5,6 +5,7 @@ import { classify, ClassifierError, resolveModel } from "./classifier";
 import { configFingerprint, type CruiseControlConfig, loadConfig, saveGlobalInstructions } from "./config";
 import { ConcurrencyLimiter } from "./limiter";
 import { StatsTracker } from "./stats";
+import { HEALTH_TOOL_NAME } from "./types";
 import type { Classification, ClassificationRequest, Decision } from "./types";
 
 /** How many recent user prompts the classifier sees when judging intent. */
@@ -119,6 +120,19 @@ export class Gate {
     ctx: ExtensionContext,
     started: number,
   ): Promise<Decision> {
+    if (request.toolName === HEALTH_TOOL_NAME) {
+      return {
+        risk: "low",
+        intent: "high",
+        reason: `${HEALTH_TOOL_NAME} is read-only and exempt so it can diagnose the classifier itself.`,
+        approved: true,
+        source: "skipped",
+        durationMs: Date.now() - started,
+        attempts: 0,
+        queueMs: 0,
+      };
+    }
+
     if (this.config.skipTools.includes(request.toolName)) {
       return {
         risk: "low",
