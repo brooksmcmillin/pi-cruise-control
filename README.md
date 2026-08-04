@@ -59,6 +59,21 @@ settings file too, ready to edit.
 
 `model` and `reasoning` open a searchable picker when called without an argument.
 
+## Health check tool
+
+The extension also registers a read-only tool the agent can call to test the classifier:
+
+```
+cruise_control_health
+```
+
+It reports configuration state (active/inactive/disabled), which model is in use and whether it
+resolves, cache and session stats, and then runs a **live probe**: one real classification of a
+benign `read` call through the configured model, with latency. A healthy classifier approves that
+call; a fault shows up as the exact error and whether it is retryable. The tool is exempt from the
+gate itself, so a classifier that is down or misconfigured still gets diagnosed instead of blocking
+its own health check with a fallback denial.
+
 ## License
 
 MIT
