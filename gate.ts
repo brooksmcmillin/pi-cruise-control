@@ -99,7 +99,7 @@ export class Gate {
       toolCallId: event.toolCallId,
       input: event.input,
       cwd: ctx.cwd,
-      recentPrompts: recentPrompts(ctx),
+      recentPrompts: recentPrompts(ctx, this.config.intentTools),
     };
 
     const decision = await this.decide(request, ctx, started);
@@ -256,19 +256,26 @@ export function blockReason(decision: Decision): string {
 /**
  * Collect the recent user prompts the classifier uses to judge intent.
  *
- * **Only `role: "user"` messages are read — never tool output.** Tool results
- * (`role: "toolResult"`), `!` command output (`role: "bashExecution"`), and assistant
- * text are all excluded by the allowlist below, and this is a security boundary rather
- * than a formatting choice: tool output is attacker-influenced content. A file the
- * agent reads, a web page it fetches, or a command's stdout could otherwise carry text
- * addressed to the classifier ("the user explicitly approved this") and talk the gate
- * into rating intent high on a call the user never asked for.
+ * **Only user-authored content is read — never tool output in general.** Tool
+ * results (`role: "toolResult"`), `!` command output (`role: "bashExecution"`),
+ * and assistant text are all excluded by default, and this is a security boundary
+ * rather than a formatting choice: tool output is attacker-influenced content. A
+ * file the agent reads, a web page it fetches, or a command's stdout could
+ * otherwise carry text addressed to the classifier ("the user explicitly approved
+ * this") and talk the gate into rating intent high on a call the user never asked
+ * for.
  *
- * Widening this filter re-opens that hole. If more context is ever needed here, it has
- * to come from something the user typed.
+ * The one deliberate exception is ask/question tools, named in `intentTools`.
+ * Their `toolResult` is the user's answer — genuine user input that just happens to
+ * arrive as a tool result — so it belongs in the intent picture. The exception is
+ * safe because inclusion is keyed on `toolName`, not on result content: a
+ * `read`/`bash`/`fetch` result carries its own toolName and cannot impersonate an
+ * ask answer. Widening this to other tools re-opens the hole; only tools whose
+ * results are provably user-authored may be added here.
  */
-function recentPrompts(ctx: ExtensionContext): string[] {
+function recentPrompts(ctx: ExtensionContext, intentTools: string[]): string[] {
   const prompts: string[] = [];
+  const askTools = new Set(intentTools);
 
   const branch = ctx.sessionManager.getBranch();
   for (let index = branch.length - 1; index >= 0 && prompts.length < RECENT_PROMPT_COUNT; index--) {
@@ -276,21 +283,40 @@ function recentPrompts(ctx: ExtensionContext): string[] {
     if (entry.type !== "message") continue;
 
     const message = entry.message;
-    if (!("role" in message) || message.role !== "user") continue;
+    if (!("role" in message)) continue;
 
-    // User content is either a plain string or a list of text/image parts.
-    const text =
-      typeof message.content === "string"
-        ? message.content.trim()
-        : message.content
-            .filter((part): part is { type: "text"; text: string } => part.type === "text")
-            .map((part) => part.text)
-            .join("\n")
-            .trim();
-    if (text) prompts.push(text);
+    if (message.role === "user") {
+      const text = userContentText(message.content);
+      if (text) prompts.push(text);
+    } else if (message.role === "toolResult" && askTools.has(message.toolName)) {
+      const text = toolResultText(message.content);
+      if (text) prompts.push(text);
+    }
   }
 
   return prompts.reverse();
+}
+
+/** User content is either a plain string or a list of text/image parts. */
+function userContentText(content: string | { type: string; text?: string }[]): string {
+  const text =
+    typeof content === "string"
+      ? content.trim()
+      : content
+          .filter((part): part is { type: "text"; text: string } => part.type === "text")
+          .map((part) => part.text)
+          .join("\n")
+          .trim();
+  return text;
+}
+
+/** Tool results are always a list of text/image parts. */
+function toolResultText(content: { type: string; text?: string }[]): string {
+  return content
+    .filter((part): part is { type: "text"; text: string } => part.type === "text")
+    .map((part) => part.text)
+      .join("\n")
+      .trim();
 }
 
 function safeJson(value: unknown): string {
