@@ -1,11 +1,42 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveModel } from "./classifier";
 import { registerCommands } from "./commands";
-import { saveGlobalField } from "./config";
+import { markIntentToolsPrompted, saveGlobalField, saveGlobalIntentTools } from "./config";
 import { blockReason, Gate } from "./gate";
 import { registerHealthTool } from "./health";
 import { notifyIfInstructionsWritten } from "./instructions-notice";
 import { canPrompt, readAvailable, selectModel } from "./selectors";
+import { HEALTH_TOOL_NAME } from "./types";
+
+/** Name tokens that suggest a tool collects user answers. */
+const ASK_TOKENS = new Set([
+  "ask",
+  "question",
+  "questionnaire",
+  "clarif",
+  "clarify",
+  "clarifying",
+  "poll",
+]);
+/**
+ * Description phrases. Kept tighter than the name match so a tool that merely
+ * mentions "ask" in passing (e.g. "ask the database") is not surfaced.
+ */
+const ASK_DESC_PHRASES = [
+  "ask the user",
+  "ask user",
+  "user question",
+  "clarifying question",
+  "questionnaire",
+];
+
+/** True if a tool's name or description looks like it collects user answers. */
+function looksLikeAskTool(name: string, description: string | undefined): boolean {
+  if (name.toLowerCase().split(/[^a-z]+/).some((tok) => ASK_TOKENS.has(tok))) return true;
+  if (typeof description !== "string") return false;
+  const desc = description.toLowerCase();
+  return ASK_DESC_PHRASES.some((phrase) => desc.includes(phrase));
+}
 
 /**
  * Auto-classifies every tool call and blocks the ones that fail the policy.
@@ -51,6 +82,12 @@ export default function (pi: ExtensionAPI) {
 
     notifyIfInstructionsWritten(gate, ctx);
 
+    // First-run nudge: if an ask/question tool is installed but not in intent_tools,
+    // the intent classifier would miss the user's answers. Ask once, then stop.
+    if (config.model && canPrompt(ctx)) {
+      void promptForIntentTools(ctx, pi).catch(() => undefined);
+    }
+
     if (!resolveModel(config, ctx)) {
       const detail = config.model ? `"${config.model}" is unavailable` : "no model is selected";
       ctx.ui.notify(
@@ -83,6 +120,55 @@ export default function (pi: ExtensionAPI) {
 
     // A model now exists, so the rules are worth writing down.
     notifyIfInstructionsWritten(gate, ctx);
+  }
+
+  /**
+   * One-time nudge to add installed ask/question tools to `intent_tools`.
+   *
+   * The intent classifier only sees user-authored content. An ask tool's answer is
+   * user input but arrives as a `toolResult`, so unless the tool is listed in
+   * `intent_tools` the classifier misses it and a call the user just authorized can
+   * still be denied.
+   *
+   * Detection by name/description only *surfaces candidates* — it never adds
+   * anything automatically. Each candidate is confirmed individually so the user,
+   * not a heuristic, decides whether a tool's results are genuinely user-authored.
+   * A deceptive name can be declined. If detection finds nothing, nothing happens
+   * (no flag is set), so a tool installed later still triggers the nudge.
+   */
+  async function promptForIntentTools(ctx: ExtensionContext, pi: ExtensionAPI): Promise<void> {
+    const config = gate.getConfig();
+    if (config.intentToolsPrompted) return;
+
+    const known = new Set(config.intentTools);
+    let tools: { name: string; description?: string }[] = [];
+    try {
+      tools = (pi.getAllTools?.() ?? []).map((t) => ({ name: t.name, description: t.description }));
+    } catch {
+      return;
+    }
+
+    const candidates = tools.filter(
+      (t) => t.name !== HEALTH_TOOL_NAME && !known.has(t.name) && looksLikeAskTool(t.name, t.description),
+    );
+    if (candidates.length === 0) return;
+
+    const toAdd: string[] = [];
+    for (const tool of candidates) {
+      const ok = await ctx.ui.confirm(
+        "cruise-control: ask/question tool detected",
+        `Is "${tool.name}" a tool that collects your answers? Add it to intent_tools so the intent classifier sees your replies.${tool.description ? `\n${tool.description.slice(0, 160)}` : ""}`,
+      );
+      if (ok) toAdd.push(tool.name);
+    }
+
+    if (toAdd.length > 0) {
+      const merged = [...new Set([...config.intentTools, ...toAdd])];
+      saveGlobalIntentTools(merged);
+      gate.reloadConfig(ctx.cwd);
+      ctx.ui.notify(`cruise-control intent_tools: ${merged.join(", ")}`, "info");
+    }
+    markIntentToolsPrompted();
   }
 
   pi.on("tool_call", async (event, ctx) => {

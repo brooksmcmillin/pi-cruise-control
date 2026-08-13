@@ -56,6 +56,17 @@ export interface CruiseControlConfig {
   onError: "allow" | "deny";
   /** Tool names that bypass classification entirely. */
   skipTools: string[];
+  /**
+   * Tool names whose `toolResult` is treated as user intent when judging later calls.
+   *
+   * An ask/question tool's answer is genuine user input that happens to arrive as a
+   * tool result, so it belongs in the intent picture. Inclusion is keyed on toolName
+   * (not result content), so attacker-influenced output from `read`/`bash`/`fetch` —
+   * which carries its own toolName — cannot impersonate a user answer.
+   */
+  intentTools: string[];
+  /** True once the first-run nudge to add ask/question tools has been shown. */
+  intentToolsPrompted: boolean;
   retry: RetryConfig;
   /** Classifications allowed in flight at once. 0 means unlimited. */
   maxConcurrent: number;
@@ -119,6 +130,10 @@ function defaults(): CruiseControlConfig {
     timeoutMs: 20_000,
     onError: "deny",
     skipTools: [],
+    // `ask_user_question` is the canonical pi ask tool. Users with a different ask
+    // tool, or a future cruise-control one, add its name under `intent_tools`.
+    intentTools: ["ask_user_question"],
+    intentToolsPrompted: false,
     retry: { attempts: 2, initialDelayMs: 500, maxDelayMs: 4000 },
     maxConcurrent: 0,
     cache: { enabled: true, ttlMs: 30 * 60_000, maxEntries: 500 },
@@ -172,6 +187,20 @@ export function saveGlobalField(field: "model" | "reasoning" | "enabled", value:
   });
 }
 
+/** Persist the full `intent_tools` list (snake_cased) to the global settings file. */
+export function saveGlobalIntentTools(tools: string[]): void {
+  writeGlobalSection((section) => {
+    section.intent_tools = tools;
+  });
+}
+
+/** Record that the first-run nudge to add ask/question tools has been shown. */
+export function markIntentToolsPrompted(): void {
+  writeGlobalSection((section) => {
+    section.intent_tools_prompted = true;
+  });
+}
+
 /**
  * Write the built-in rules into the global settings file so they stop being invisible
  * defaults and become text the user can read and edit.
@@ -202,7 +231,8 @@ function writeGlobalSection(mutate: (section: RawRecord) => void): void {
  * settings edit invalidates previously cached approvals instead of outliving them.
  */
 export function configFingerprint(config: CruiseControlConfig): string {
-  const material = JSON.stringify([config.model, config.reasoning, config.instructions]);
+  // intentTools changes how intent is judged, so it must invalidate cached verdicts.
+  const material = JSON.stringify([config.model, config.reasoning, config.instructions, config.intentTools]);
   return createHash("sha256").update(material).digest("hex").slice(0, 16);
 }
 
@@ -213,6 +243,8 @@ function applySection(config: CruiseControlConfig, raw: RawRecord): void {
   if (isPositiveNumber(raw.timeout_ms)) config.timeoutMs = raw.timeout_ms;
   if (raw.on_error === "allow" || raw.on_error === "deny") config.onError = raw.on_error;
   if (Array.isArray(raw.skip_tools)) config.skipTools = stringArray(raw.skip_tools);
+  if (Array.isArray(raw.intent_tools)) config.intentTools = stringArray(raw.intent_tools);
+  if (typeof raw.intent_tools_prompted === "boolean") config.intentToolsPrompted = raw.intent_tools_prompted;
 
   // `parallel` is the coarse switch (false means one at a time); `max_concurrent` is the
   // precise value and is applied second so it wins whenever both appear in one scope.
