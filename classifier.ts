@@ -2,7 +2,11 @@ import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { Api, Model, UserMessage } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { CruiseControlConfig, Instructions } from "./config";
-import { type Classification, type ClassificationRequest, isLevel } from "./types";
+import {
+  type Classification,
+  type ClassificationRequest,
+  isLevel,
+} from "./types";
 
 /** Tool input is truncated before it reaches the classifier; verdicts hinge on shape, not bulk. */
 const MAX_INPUT_CHARS = 4000;
@@ -60,7 +64,9 @@ export async function classify(
   const model = resolveModel(config, ctx);
   if (!model) {
     throw new ClassifierError(
-      config.model ? `classifier model "${config.model}" is not available` : "no classifier model selected",
+      config.model
+        ? `classifier model "${config.model}" is not available`
+        : "no classifier model selected",
     );
   }
 
@@ -77,37 +83,52 @@ export async function classify(
   try {
     response = await completeSimple(
       model,
-      { systemPrompt: buildSystemPrompt(config.instructions), messages: [message] },
+      {
+        systemPrompt: buildSystemPrompt(config.instructions),
+        messages: [message],
+      },
       {
         apiKey: auth.apiKey,
         headers: auth.headers,
         env: auth.env,
         reasoning: config.reasoning,
-        temperature: 0,
         signal,
       },
     );
   } catch (error) {
-    throw new ClassifierError(error instanceof Error ? error.message : String(error), true);
+    throw new ClassifierError(
+      error instanceof Error ? error.message : String(error),
+      true,
+    );
   }
 
-  if (response.stopReason === "aborted") throw new ClassifierError("classification aborted", true);
+  if (response.stopReason === "aborted")
+    throw new ClassifierError("classification aborted", true);
   if (response.stopReason === "error") {
-    throw new ClassifierError(response.errorMessage ?? "classifier request failed", true);
+    throw new ClassifierError(
+      response.errorMessage ?? "classifier request failed",
+      true,
+    );
   }
 
   const text = response.content
-    .filter((part): part is { type: "text"; text: string } => part.type === "text")
+    .filter(
+      (part): part is { type: "text"; text: string } => part.type === "text",
+    )
     .map((part) => part.text)
     .join("\n");
 
   const parsed = parseClassification(text);
-  if (!parsed) throw new ClassifierError("classifier returned no usable verdict", true);
+  if (!parsed)
+    throw new ClassifierError("classifier returned no usable verdict", true);
   return parsed;
 }
 
 /** Resolve `provider/modelId` against the registry, falling back to the session model. */
-export function resolveModel(config: CruiseControlConfig, ctx: ExtensionContext): Model<Api> | undefined {
+export function resolveModel(
+  config: CruiseControlConfig,
+  ctx: ExtensionContext,
+): Model<Api> | undefined {
   if (!config.model) return ctx.model;
 
   const separator = config.model.indexOf("/");
@@ -121,7 +142,8 @@ export function resolveModel(config: CruiseControlConfig, ctx: ExtensionContext)
 export function buildSystemPrompt(instructions: Instructions): string {
   const sections: string[] = [OUTPUT_CONTRACT];
   const append = (title: string, lines: string[]) => {
-    if (lines.length > 0) sections.push(`${title}\n${lines.map((line) => `- ${line}`).join("\n")}`);
+    if (lines.length > 0)
+      sections.push(`${title}\n${lines.map((line) => `- ${line}`).join("\n")}`);
   };
 
   append("Background:", instructions.background);
@@ -137,7 +159,9 @@ function buildPayload(request: ClassificationRequest): string {
     tool: request.toolName,
     input: truncate(safeJson(request.input), MAX_INPUT_CHARS),
     cwd: request.cwd,
-    recent_user_prompts: request.recentPrompts.map((prompt) => truncate(prompt, MAX_PROMPT_CHARS)),
+    recent_user_prompts: request.recentPrompts.map((prompt) =>
+      truncate(prompt, MAX_PROMPT_CHARS),
+    ),
   };
   return `Tool call to classify:\n${JSON.stringify(payload, null, 2)}`;
 }
@@ -162,7 +186,8 @@ export function parseClassification(text: string): Classification | undefined {
   const candidate = parsed as Record<string, unknown>;
   if (!isLevel(candidate.risk) || !isLevel(candidate.intent)) return undefined;
 
-  const reason = typeof candidate.reason === "string" ? candidate.reason.trim() : "";
+  const reason =
+    typeof candidate.reason === "string" ? candidate.reason.trim() : "";
   return {
     risk: candidate.risk,
     intent: candidate.intent,
@@ -173,7 +198,10 @@ export function parseClassification(text: string): Classification | undefined {
 function clampReason(reason: string): string {
   const collapsed = reason.replace(/\s+/g, " ").trim();
   const words = collapsed.split(" ");
-  const clipped = words.length > MAX_REASON_WORDS ? `${words.slice(0, MAX_REASON_WORDS).join(" ")}…` : collapsed;
+  const clipped =
+    words.length > MAX_REASON_WORDS
+      ? `${words.slice(0, MAX_REASON_WORDS).join(" ")}…`
+      : collapsed;
   return truncate(clipped, MAX_REASON_CHARS);
 }
 
